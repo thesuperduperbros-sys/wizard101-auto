@@ -131,8 +131,8 @@ echo       installed.
 
 :configured
 if not exist config.yaml (
-  copy configs\myth.yaml config.yaml >nul
-  echo       created config.yaml from the Myth preset.
+  copy configs\couch_potato.yaml config.yaml >nul
+  echo       created config.yaml from the Couch Potato farm preset.
 )
 set "BOT=.venv\Scripts\python.exe -m wiz101_auto"
 if defined HAS_ARGS (

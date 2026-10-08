@@ -76,7 +76,7 @@ class CombatConfig:
 
 @dataclass
 class ProgressionConfig:
-    enabled: bool = True
+    enabled: bool = False
     school: str = ""  # blank = read from the game
     rebuild_on_start: bool = True
     check_minutes: float = 30.0  # re-read the spellbook this often (0 = only on events)
@@ -111,10 +111,11 @@ class DeckSearchConfig:
 class PetConfig:
     """Pet dance-game grinding (petdance.py). `auto`: whenever the wizard's
     energy is full, mark, go to the Pet Pavilion and play until it runs out,
-    then Recall back. A pet stops at its goal stage (`goals`, by pet kind,
-    lower case), any other pet at `default_goal` (the top: Mega)."""
+    then Recall back. When `stop_at_goal` is true, a pet stops at its goal
+    stage (`goals`, by pet kind, lower case), or `default_goal`."""
 
     auto: bool = True
+    stop_at_goal: bool = False
     goals: dict = field(default_factory=lambda: {"bloodbat": "adult", "fellhound": "adult"})
     default_goal: str = "mega"
     feed: bool = True  # feed the first snack offered after each win
@@ -130,8 +131,10 @@ class MovementConfig:
 
 @dataclass
 class Config:
-    mode: str = "quest"  # quest | fight | farm | boss
+    mode: str = "farm"  # quest | fight | farm | boss
     farm_seconds_between_fights: float = 2.0
+    farm_zone: str = "Grizzleheim/GH_Hero"
+    farm_mob: str = "Troubled Warrior"
     log_file: str = "wiz101-auto.log"
     gear_checks: bool = True  # try on gear after level-ups and new items (slow: minutes per check)
     gear_checks_new_items: bool = True  # false: only after level-ups (new loot is still logged)
@@ -181,4 +184,6 @@ def load_config(path: str | Path | None) -> Config:
         raise ValueError(f"mode must be quest, fight, farm or boss, not {cfg.mode!r}")
     if cfg.mode == "boss" and not cfg.boss_farm.boss:
         raise ValueError("mode: boss needs boss_farm.boss (the boss's name)")
+    if cfg.mode == "farm" and (not cfg.farm_zone.strip() or not cfg.farm_mob.strip()):
+        raise ValueError("mode: farm needs non-empty farm_zone and farm_mob")
     return cfg

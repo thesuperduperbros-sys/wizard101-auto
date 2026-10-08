@@ -39,8 +39,23 @@ def test_average_effects_for_random_spells():
 
 def test_example_config_loads():
     cfg = load_config(Path(__file__).parent.parent / "config.example.yaml")
-    assert cfg.mode == "quest"
+    assert cfg.mode == "farm"
+    assert not cfg.progression.enabled
+    assert cfg.safety.max_hours == 0
+    assert cfg.pet.auto and not cfg.pet.stop_at_goal
     assert 0 < cfg.combat.strategy.heal_threshold < 1
+
+
+def test_no_config_defaults_to_couch_potato_farm():
+    cfg = load_config(None)
+    assert cfg.mode == "farm"
+    assert cfg.farm_zone == "Grizzleheim/GH_Hero"
+    assert cfg.farm_mob == "Troubled Warrior"
+    assert not cfg.progression.enabled
+    assert cfg.safety.max_hours == 0
+    assert cfg.pet.auto and not cfg.pet.stop_at_goal
+    assert cfg.pet.auto
+    assert not cfg.pet.stop_at_goal
 
 
 def test_unknown_key_rejected(tmp_path):
@@ -60,6 +75,15 @@ def test_wrong_type_rejected(tmp_path):
 def test_myth_preset_loads():
     cfg = load_config(Path(__file__).parent.parent / "configs" / "myth.yaml")
     assert cfg.progression.school == "Myth"
+
+
+def test_couch_potato_preset_targets_savarstaad_warriors():
+    cfg = load_config(Path(__file__).parent.parent / "configs" / "couch_potato.yaml")
+    assert cfg.mode == "farm"
+    assert cfg.farm_zone == "Grizzleheim/GH_Hero"
+    assert cfg.farm_mob == "Troubled Warrior"
+    assert not cfg.progression.enabled
+    assert cfg.safety.max_hours == 0
 
 
 @pytest.mark.parametrize(

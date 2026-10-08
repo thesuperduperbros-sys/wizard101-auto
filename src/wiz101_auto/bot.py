@@ -26,6 +26,7 @@ from .trainer import SpellTrainer
 from .upkeep import (
     DialoguePolicy,
     dialogue_loop,
+    health_mana,
     is_free,
     maintain,
     max_health,
@@ -40,6 +41,45 @@ CONNECT_TIMEOUT = 300.0  # the whole way into the world (reconnect, Play, hooks)
 DEATH_HEALTH_RATIO = 0.1
 GRIND_SHOWN_SECONDS = 90.0  # the status says "grinding" this long after the last grind step
 DEFEAT_MOVE_DISTANCE = 1500.0  # a defeat puts you back at the zone's start (or another zone)
+CAMP_POSITION_TOLERANCE = 600.0
+
+
+async def return_to_farm_camp(client, quester, zone: str, position) -> bool:
+    """Return to the saved farm position, traveling back to its zone if needed."""
+    current_zone = await client.zone_name() or ""
+    if current_zone != zone:
+        logger.info(f"returning to farm zone {zone} from {current_zone or 'unknown zone'}")
+        if not await quester.go_to_zone(zone) or await client.zone_name() != zone:
+            logger.warning(f"could not return to farm zone {zone}")
+            return False
+    here = await client.body.position()
+    if here.distance(position) <= CAMP_POSITION_TOLERANCE:
+        return True
+    logger.info(f"returning to farm camp position in {zone}")
+    from .safe_teleport import allow_engage
+
+    allow_engage(client)
+    await client.teleport(position)
+    await asyncio.sleep(0.5)
+    here = await client.body.position()
+    if here.distance(position) > CAMP_POSITION_TOLERANCE:
+        logger.warning("could not return to the saved farm camp position")
+        return False
+    return True
+
+
+async def go_to_farm_recovery_zone(client, quester) -> bool:
+    """Go to Northguard before farm-mode recovery, away from Savarstaad patrols."""
+    from .farm import FARM_HEAL_ZONE
+
+    zone = await client.zone_name() or ""
+    if zone == FARM_HEAL_ZONE:
+        return True
+    logger.info(f"going to Northguard for health/mana recovery from {zone or 'unknown zone'}")
+    if not await quester.go_to_zone(FARM_HEAL_ZONE) or await client.zone_name() != FARM_HEAL_ZONE:
+        logger.warning("could not reach Northguard for health/mana recovery")
+        return False
+    return True
 
 
 def new_handler() -> ClientHandler:
@@ -467,20 +507,156 @@ async def quest_loop(quester: Quester, controller: Controller):
         await asyncio.sleep(0.5)
 
 
-async def farm_loop(client, cfg: Config, controller: Controller, progression: Progression):
-    """Stay in the current area and fight the nearest mob, repeatedly."""
-    sprinter = client  # a SprintyClient, see new_handler()
+async def farm_loop(client, cfg: Config, controller: Controller, progression: Progression, quester):
+    """Camp in the wizard's starting zone and fight only its target mob."""
+    from .backpack import BackpackSeller
+    from .bossfarm import mobs_named
+    from .farm import FARM_HEAL_ZONE, is_farm_zone, is_target_mob
+
+    backpack_seller = BackpackSeller(quester)
+    camp_zone = await client.zone_name() or ""
+    camp_position = await client.body.position() if camp_zone else None
+    logger.info(f"camping for {cfg.farm_mob} in current zone {camp_zone or 'unknown'}; will not travel")
+    if camp_zone and not is_farm_zone(camp_zone, cfg.farm_zone):
+        logger.warning(
+            f"current zone {camp_zone} differs from configured farm zone {cfg.farm_zone}; "
+            "staying here as requested"
+        )
+    last_wrong_zone = None
+    return_to_camp = False
+    waiting_for_safe_recovery = False
+
+    async def restore_camp() -> bool:
+        nonlocal return_to_camp
+        if camp_position is None:
+            logger.warning(
+                f"cannot return to farm camp in {camp_zone or 'unknown'}: no camp position was saved"
+            )
+            return False
+        return_to_camp = not await return_to_farm_camp(client, quester, camp_zone, camp_position)
+        return not return_to_camp
+
     while not controller.stopped.is_set():
         await controller.checkpoint()
+        zone = await client.zone_name() or ""
+        if not camp_zone and zone:
+            camp_zone = zone
+            camp_position = await client.body.position()
+            logger.info(f"farm camp established in {camp_zone}")
+        if zone != camp_zone:
+            if waiting_for_safe_recovery and zone == FARM_HEAL_ZONE and await is_free(client):
+                await maintain(client, cfg.upkeep)
+                recovered = await recover(
+                    client, cfg.upkeep, controller, safe_heal_zone=FARM_HEAL_ZONE
+                )
+                hp, mana = await health_mana(client)
+                if recovered and not cfg.upkeep.needs_recovery(hp, mana):
+                    waiting_for_safe_recovery = False
+                    return_to_camp = True
+                else:
+                    logger.warning(
+                        f"still needs recovery in Northguard ({hp:.0%} health, {mana:.0%} mana); "
+                        "waiting here instead of returning to farm"
+                    )
+                    await asyncio.sleep(max(15.0, cfg.farm_seconds_between_fights))
+                continue
+            if backpack_seller.pending_return and camp_position and await is_free(client):
+                backpack_seller.pending_return = not await backpack_seller.return_to_camp(
+                    camp_zone, camp_position
+                )
+                await asyncio.sleep(max(15.0, cfg.farm_seconds_between_fights))
+                continue
+            if return_to_camp and camp_position and await is_free(client):
+                await restore_camp()
+                await asyncio.sleep(cfg.farm_seconds_between_fights)
+                continue
+            if zone != last_wrong_zone:
+                logger.warning(
+                    f"outside farm camp ({camp_zone}); waiting in "
+                    f"{zone or 'unknown zone'} without traveling"
+                )
+                last_wrong_zone = zone
+            await asyncio.sleep(cfg.farm_seconds_between_fights)
+            continue
+        last_wrong_zone = None
         if await is_free(client):
+            if return_to_camp and not await restore_camp():
+                await asyncio.sleep(cfg.farm_seconds_between_fights)
+                continue
+            hp, mana = await health_mana(client)
+            needs_recovery = cfg.upkeep.needs_recovery(hp, mana) or (
+                cfg.upkeep.collect_wisps and hp < cfg.upkeep.wisp_health_ratio
+            )
+            if needs_recovery:
+                if not await go_to_farm_recovery_zone(client, quester):
+                    return_to_camp = (
+                        camp_position is not None and await client.zone_name() != camp_zone
+                    )
+                    await asyncio.sleep(cfg.farm_seconds_between_fights)
+                    continue
+                return_to_camp = camp_position is not None
             await maintain(client, cfg.upkeep)
-            if not await recover(client, cfg.upkeep, controller):
+            recovered = await recover(
+                client, cfg.upkeep, controller, safe_heal_zone=FARM_HEAL_ZONE
+            )
+            if not recovered:
+                waiting_for_safe_recovery = await client.zone_name() == FARM_HEAL_ZONE
+                return_to_camp = camp_position is not None and not waiting_for_safe_recovery
+                if waiting_for_safe_recovery:
+                    await asyncio.sleep(max(15.0, cfg.farm_seconds_between_fights))
+                continue
+            hp, mana = await health_mana(client)
+            if cfg.upkeep.needs_recovery(hp, mana):
+                waiting_for_safe_recovery = await client.zone_name() == FARM_HEAL_ZONE
+                return_to_camp = camp_position is not None and not waiting_for_safe_recovery
+                logger.warning(
+                    f"recovery did not reach the fight threshold ({hp:.0%} health, {mana:.0%} mana)"
+                )
+                if waiting_for_safe_recovery:
+                    await asyncio.sleep(max(15.0, cfg.farm_seconds_between_fights))
+                continue
+            if camp_position:
+                zone_after_recovery = await client.zone_name() or ""
+                here = await client.body.position()
+                if zone_after_recovery != camp_zone or here.distance(camp_position) > CAMP_POSITION_TOLERANCE:
+                    return_to_camp = True
+                if return_to_camp and not await restore_camp():
+                    await asyncio.sleep(cfg.farm_seconds_between_fights)
+                    continue
+            if camp_position and await backpack_seller.tick(camp_zone, camp_position):
+                if await client.zone_name() != camp_zone:
+                    return_to_camp = True
+                await asyncio.sleep(max(15.0, cfg.farm_seconds_between_fights))
                 continue
             await progression.tick()
-            try:
-                await sprinter.tp_to_closest_mob()
-            except Exception as exc:
-                logger.debug(f"no mob nearby: {exc}")
+            pet = getattr(quester, "pet", None)
+            if pet:
+                controller.allow_idle(1800)
+                try:
+                    if await pet.tick():
+                        return_to_camp = camp_position is not None
+                        continue
+                except Exception as exc:
+                    logger.opt(exception=exc).warning("pet dance trip failed; continuing farm")
+                finally:
+                    controller.end_idle()
+            targets = [
+                position
+                for name, position in await mobs_named(client)
+                if is_target_mob(name, cfg.farm_mob)
+            ]
+            if targets:
+                me = await client.body.position()
+                target = min(targets, key=me.distance)
+                from .safe_teleport import allow_engage
+
+                allow_engage(client)
+                await client.teleport(target)
+            else:
+                # Waiting at a spawn is intentional; the watchdog's stall
+                # recovery would otherwise move the wizard away from camp.
+                controller.allow_idle(20)
+                logger.debug(f"no {cfg.farm_mob} nearby")
         await asyncio.sleep(cfg.farm_seconds_between_fights)
 
 
@@ -581,7 +757,7 @@ async def run(cfg: Config):
             # Every gate walked through, the player's too (paused), into doors.json.
             tasks.append(asyncio.create_task(gate_watch(client, quester.doors, controller), name="gates"))
         watchdog = None
-        if s.stall_seconds > 0 and cfg.mode in ("quest", "farm"):
+        if s.stall_seconds > 0 and cfg.mode == "quest":
             watchdog = Watchdog(
                 client,
                 controller,
@@ -595,8 +771,19 @@ async def run(cfg: Config):
             farmer = BossFarmer(boss_quester, cfg.boss_farm, cfg.upkeep, controller)
             tasks.append(asyncio.create_task(farmer.run(), name="boss"))
         if cfg.mode == "farm":
-            tasks.append(asyncio.create_task(farm_loop(client, cfg, controller, progression), name="farm"))
+            farm_quester = Quester(client, cfg.quest, controller, progression, cfg.upkeep, dialogue)
+            farm_quester.pet = PetDancer(farm_quester, cfg.pet)
+            tasks.append(
+                asyncio.create_task(
+                    farm_loop(client, cfg, controller, progression, farm_quester), name="farm"
+                )
+            )
 
+        from .upkeep import endorsement_loop
+
+        tasks.append(
+            asyncio.create_task(endorsement_loop(client, controller), name="endorsement")
+        )
         tasks.append(
             asyncio.create_task(status_loop(client, controller, fighter, quester, watchdog), name="status")
         )

@@ -25,9 +25,10 @@ def wisp_hub(zone: str, need=None) -> bool:
 
 def is_hub_zone(zone: str) -> bool:
     """A world's hub (the Oasis, the Commons, the Basilica): never any wisps."""
+    from .farm import FARM_HEAL_ZONE
     from .travel_data import is_world_hub
 
-    return is_world_hub(zone)
+    return zone == FARM_HEAL_ZONE or is_world_hub(zone)
 
 
 async def is_free(client) -> bool:
@@ -488,6 +489,7 @@ _leaving_interior: set[str] = set()
 REST_PROBE_SECONDS = 60.0  # resting this long without gaining anything: no wisps here, heal elsewhere
 BARREN_SECONDS = 1800.0  # how long a zone that gave nothing is skipped as a place to heal
 _barren: dict[str, float] = {}  # zone -> when resting there gave nothing
+_farm_safe_heal_swept: set[str] = set()
 
 
 _healed_in: dict[str, str] = {}  # world -> the zone where the last heal there worked
@@ -628,7 +630,10 @@ def needed_wisps(cfg: UpkeepConfig, hp: float, mana: float) -> frozenset[str]:
     return frozenset(need or BOTH)
 
 
-async def recover(client, cfg: UpkeepConfig, controller, go_to_zone=None, trip=None, mark=None) -> bool:
+async def recover(
+    client, cfg: UpkeepConfig, controller, go_to_zone=None, trip=None, mark=None,
+    safe_heal_zone: str | None = None,
+) -> bool:
     """Make sure the wizard is healthy before engaging anything.
 
     With `mark` (async, True if it marked the spot): mark first, then heal in
@@ -714,9 +719,15 @@ async def recover(client, cfg: UpkeepConfig, controller, go_to_zone=None, trip=N
         if cfg.collect_wisps:
             zone = await client.zone_name() or "?"
             need = needed_wisps(cfg, hp, mana)
-            hub = wisp_hub(zone, need)  # the Oasis, the Commons: no wisps (Celestia's: mana)
-            known_elsewhere = best_wisp_zone(zone, preferred=_heal_prefs(cfg), need=need,
-                                             avoid=barren_zones(), hops=hops_from_hub) is not None
+            farm_safe_heal_zone = safe_heal_zone is not None and zone == safe_heal_zone
+            # Northguard is normally treated as an empty hub. In farm mode,
+            # search it once for wisps, but never wander back among Savarstaad mobs.
+            hub = wisp_hub(zone, need) and not farm_safe_heal_zone
+            known_elsewhere = (
+                not farm_safe_heal_zone
+                and best_wisp_zone(zone, preferred=_heal_prefs(cfg), need=need,
+                                   avoid=barren_zones(), hops=hops_from_hub) is not None
+            )
             if hub:
                 fruitless = FRUITLESS_VISITS
             if not hub and await visit_known_spot(client, cfg, zone, need):
@@ -730,10 +741,13 @@ async def recover(client, cfg: UpkeepConfig, controller, go_to_zone=None, trip=N
                 fruitless = 0 if gained else fruitless + 1
                 if fruitless < FRUITLESS_VISITS:
                     continue
-            if zone not in swept and not hub and not known_elsewhere:
+            if (zone not in swept and not hub and not known_elsewhere
+                    and (not farm_safe_heal_zone or zone not in _farm_safe_heal_swept)):
                 # Only where no wisp zone is known yet: the sweep hops across
                 # landmarks (NPCs, objects) to discover the spawns.
                 swept.add(zone)
+                if farm_safe_heal_zone:
+                    _farm_safe_heal_swept.add(zone)
                 if await sweep_for_wisps(client, cfg):
                     continue
             # The wisps visited above may have done the job (14% -> 88% in
@@ -1039,19 +1053,39 @@ async def clear_popups(client):
         await asyncio.sleep(0.5)
     await ui.close_chat(client)
     await ui.dismiss_notice(client)
-    if await ui.is_visible(client, ui.ENDORSEMENT):
-        logger.info("endorsing the wizard we fought with (Friendly) to close the window")
-        if not await ui.click(client, ui.ENDORSE_FRIENDLY):
-            await ui.click(client, ui.ENDORSE_CLOSE)
-        await asyncio.sleep(0.5)
-        if await ui.is_visible(client, ui.ENDORSEMENT):
-            await ui.click(client, ui.ENDORSE_CLOSE)
+    await dismiss_endorsement(client)
     await ui.click(client, ui.CANCEL_CHEST_REROLL)
     if await ui.is_visible(client, ui.MINIGAME_EXIT):
         logger.info("closing the minigame picker")
         await ui.click(client, ui.MINIGAME_EXIT)
     if await ui.is_visible(client, ui.MISSING_AREA_RETRY):
         await ui.click(client, ui.MISSING_AREA_RETRY)
+
+
+async def dismiss_endorsement(client) -> bool:
+    """Choose Friendly on the post-fight endorsement popup, then verify it closed."""
+    if not await ui.is_visible(client, ui.ENDORSEMENT):
+        return False
+    logger.info("endorsing the wizard we fought with (Friendly) to close the window")
+    if await ui.click(client, ui.ENDORSE_FRIENDLY):
+        await asyncio.sleep(0.5)
+    if await ui.is_visible(client, ui.ENDORSEMENT):
+        logger.warning("endorsement window stayed open after Friendly; closing it")
+        await ui.click(client, ui.ENDORSE_CLOSE)
+        await asyncio.sleep(0.3)
+    if await ui.is_visible(client, ui.ENDORSEMENT):
+        logger.warning("endorsement window is still open")
+        return False
+    return True
+
+
+async def endorsement_loop(client, controller):
+    """Dismiss endorsement prompts even when no quest step is running."""
+    while not controller.stopped.is_set():
+        await controller.checkpoint()
+        if not await client.in_battle():
+            await dismiss_endorsement(client)
+        await asyncio.sleep(1.0)
 
 
 class DialoguePolicy:

@@ -35,10 +35,12 @@ DANCE_TITLE = "Dance Game"  # the sigil's prompt title
 NPC_TITLE = ["WorldView", "NPCRangeWin", "wndTitleBackground", "NPCRangeTxtTitle"]
 MOVES = str.maketrans("abcd", "WDSA")
 ROUNDS = 5  # rounds in a dance game
+DANCE_MOVE_DELAY = 0.03  # small gap so consecutive move inputs are not merged
 HOOK_SETTLE = 5.0  # the hook misses turns when a game starts right after it's placed
 QUEST_FIRST_MAX = 1800.0  # energy full: the quest it's on finished first, waited for at most this long
 MAX_GAMES = 200  # a ceiling for "until the energy runs out"
 WM_KEYDOWN, WM_KEYUP = 0x100, 0x101
+TRACK_BUTTON = re.compile(r"btnTrack(\d+)$")
 
 
 class DanceGameMovesHook(SimpleHook):
@@ -93,12 +95,31 @@ async def read_moves(handler: HookHandler) -> str:
         return ""
 
 
-def post_keys(window_handle: int, keys: str):
+def post_keys(window_handle: int, keys: str, delay: float = DANCE_MOVE_DELAY):
     """Key presses straight to the game window (works with it in the background)."""
     user32 = ctypes.windll.user32
     for key in keys:
         user32.PostMessageW(window_handle, WM_KEYDOWN, ord(key), 0)
         user32.PostMessageW(window_handle, WM_KEYUP, ord(key), 0)
+        if delay > 0:
+            time.sleep(delay)
+
+
+async def available_tracks(window) -> list[int]:
+    """Find visible, numbered track choices in the dance-game selector."""
+    found: set[int] = set()
+    pending = [window]
+    while pending:
+        current = pending.pop()
+        try:
+            name = await current.name()
+            match = TRACK_BUTTON.fullmatch(name or "")
+            if match and await current.is_visible():
+                found.add(int(match.group(1)))
+            pending.extend(await current.children())
+        except Exception:
+            continue
+    return sorted(found)
 
 
 def first_number(text: str) -> int | None:
@@ -251,12 +272,15 @@ class PetDancer:
         self.feed = self.cfg.feed
         self._next_check = 0.0
         self._dumped: set[str] = set()
+        self._next_track = 0
         self._wait_quest: str | None = None  # energy full: the quest to finish first
         self._wait_since = 0.0
 
     def done(self) -> bool:
         pet = load_pet()
-        return goal_reached(pet.get("kind"), pet.get("stage"), self.cfg.goals, self.cfg.default_goal)
+        return self.cfg.stop_at_goal and goal_reached(
+            pet.get("kind"), pet.get("stage"), self.cfg.goals, self.cfg.default_goal
+        )
 
     async def energy(self) -> tuple[int | None, int | None]:
         """(the wizard's energy now, its maximum): pet games cost energy."""
@@ -279,7 +303,7 @@ class PetDancer:
         if not self.cfg.auto or time.monotonic() < self._next_check:
             return False
         self._next_check = time.monotonic() + ENERGY_CHECK_SECONDS
-        if self.done():
+        if self.cfg.stop_at_goal and self.done():
             return False
         now, most = await self.energy()
         if now is None or not most or now < most:
@@ -430,16 +454,31 @@ class PetDancer:
         if cost is not None and have is not None and have < cost:
             return "no energy"
         # (Clicks while the scroll still unrolls are lost: the game never
-        # started on the other window. Settle first, and press again while
-        # the window is still up.)
+        # started on the other window. Settle first.)
         await asyncio.sleep(1.5)
-        for _ in range(3):
-            await _click(self.client, "PetGameTracks", "btnTrack0")  # the Wizard City dance track
-            await asyncio.sleep(0.5)
-            await _click(self.client, "PetGameTracks", "btnNext")  # Play
+        tracks_window = await _visible(root, "PetGameTracks")
+        tracks = await available_tracks(tracks_window) if tracks_window else []
+        if not tracks:
+            logger.warning("pet: no visible dance tracks were found")
+            return "no game"
+        start = self._next_track % len(tracks)
+        order = tracks[start:] + tracks[:start]
+        selected = None
+        for track in order:
+            if not await _click(self.client, "PetGameTracks", f"btnTrack{track}"):
+                continue
+            await asyncio.sleep(0.15)
+            if not await _click(self.client, "PetGameTracks", "btnNext"):
+                continue
             if await _wait_for(lambda: _hidden(root, "PetGameTracks"), 4):
+                selected = track
                 break
-            logger.info("pet: Play didn't take; pressing it again")
+            logger.info(f"pet: track {track} did not start; trying the next available track")
+        if selected is None:
+            logger.warning("pet: none of the visible dance tracks would start")
+            return "no game"
+        self._next_track = (tracks.index(selected) + 1) % len(tracks)
+        logger.info(f"pet: started dance track {selected}")
         if not await self.dance():
             return "no game"
         return await self.collect()

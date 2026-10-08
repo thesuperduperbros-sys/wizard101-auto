@@ -115,6 +115,7 @@ def main(argv: list[str] | None = None):
     sub.add_parser("set-login", help="save the game login (Windows Credential Manager) for game restarts")
     sub.add_parser("restart-game", help="close Wizard101, start it and log in (bot stopped)")
     insp = sub.add_parser("inspect", help="print what the bot sees (state, battle, UI)")
+    sub.add_parser("sell-backpack", help="run BackPack Buddy's Find Items sale trip once")
     insp.add_argument("--windows", action="store_true", help="also dump the visible UI window tree")
 
     deck_p = sub.add_parser("deck", help="show the planned deck from known spells, optionally apply it")
@@ -270,6 +271,13 @@ def main(argv: list[str] | None = None):
 
         asyncio.run(inspect(show_windows=args.windows))
         return
+    if args.command == "sell-backpack":
+        from .service import running_pid
+
+        if running_pid():
+            raise SystemExit("stop the background bot before running a standalone sale trip")
+        _setup_logging(None, True)
+        return asyncio.run(_sell_backpack())
 
     if args.command == "farm":
         from .farm import Farm
@@ -388,6 +396,57 @@ async def _record(minutes: float):
         client = await connect(handler)
         path = await record(client, minutes * 60)
         print(f"route saved to {path}")
+    finally:
+        await close_handler(handler)
+
+
+async def _sell_backpack() -> int:
+    from .backpack import BackpackSeller, backpack_capacity
+    from .bot import close_handler, connect, new_handler
+    from .progression import Progression
+    from .quest import Quester
+    from .safety import Controller
+    from .upkeep import is_free
+
+    cfg = load_config(None)
+    handler = new_handler()
+    try:
+        client = await connect(handler)
+        async with client.mouse_handler:
+            client._walk = cfg.movement.walk
+            client._walk_only = tuple(cfg.movement.walk_only)
+            zone = await client.zone_name() or ""
+            count, capacity = await backpack_capacity(client)
+            print(f"Inventory: {count}/{capacity}; current zone: {zone or 'unknown'}")
+            from .farm import is_farm_zone
+
+            if not is_farm_zone(zone, cfg.farm_zone):
+                logger.error(
+                    f"refusing sale trip outside configured farm zone {cfg.farm_zone}: {zone or 'unknown'}"
+                )
+                return 1
+            if not await is_free(client):
+                logger.error("refusing sale trip while loading, fighting, or in dialogue")
+                return 1
+            position = await client.body.position()
+            controller = Controller(cfg.safety.stop_key, cfg.safety.pause_key, cfg.safety.max_hours)
+            progression = Progression(client, cfg.progression)
+            quester = Quester(client, cfg.quest, controller, progression, cfg.upkeep)
+            seller = BackpackSeller(quester)
+            logger.warning("forcing the full-backpack sale procedure for this one-time live test")
+            success = await seller.run_once(zone, position)
+            if seller.pending_return:
+                logger.error("sale trip ended away from camp; return is still pending")
+                return 1
+            if not seller.last_return_succeeded:
+                logger.error("sale procedure did not verify return to the saved camp")
+                return 1
+            if not success:
+                logger.error("sale did not complete and verify an inventory decrease")
+                return 1
+            after, _capacity = await backpack_capacity(client)
+            print(f"Sale complete; inventory: {after}/{capacity}; returned to camp.")
+            return 0
     finally:
         await close_handler(handler)
 

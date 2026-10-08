@@ -47,6 +47,12 @@ def rank_options(labels: list[str], objective: str) -> list[int]:
     return sorted(range(len(labels)), key=lambda i: -len(_words(labels[i]) & target))
 
 
+def named_service_matches(label: str, name: str) -> bool:
+    """True only when every significant word in `name` occurs in the label."""
+    target = _words(name)
+    return bool(target) and target <= _words(label)
+
+
 async def _text_of(window, depth: int = 0) -> str:
     parts = []
     try:
@@ -117,6 +123,20 @@ class ServicesMenu:
     async def close(self):
         await ui.click(self.client, ["WorldView", "NPCServicesWin", "wndDialogMain", "Exit"])
 
+    async def visible_labels(self) -> list[str]:
+        win = await ui.window_at(self.client, NPC_SERVICES)
+        if win is None:
+            return []
+        options = await _option_windows(win)
+        if not options:
+            await _clickable(win, options)
+        labels = []
+        for option in options:
+            label = await _text_of(option)
+            if label:
+                labels.append(label)
+        return labels
+
     async def choose_quest(self, skip: set[str] | None = None) -> bool:
         """In an NPC's menu, click an option that isn't training or a shop (a
         quest on offer), nor one in `skip` (taken already: an accepted quest
@@ -136,6 +156,22 @@ class ServicesMenu:
             logger.info(f"NPC menu: taking {label!r}")
             await self.client.mouse_handler.click_window(o)
             return True
+        return False
+
+    async def choose_named(self, name: str) -> bool:
+        """Choose an NPC service only when its visible label contains `name`."""
+        win = await ui.window_at(self.client, NPC_SERVICES)
+        if win is None:
+            return False
+        options = await _option_windows(win)
+        if not options:
+            await _clickable(win, options)
+        for option in options:
+            label = await _text_of(option)
+            if named_service_matches(label, name):
+                logger.info(f"NPC menu: choosing {label!r}")
+                await self.client.mouse_handler.click_window(option)
+                return True
         return False
 
     async def choose_training(self) -> bool:

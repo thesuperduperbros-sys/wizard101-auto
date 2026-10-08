@@ -19,6 +19,8 @@ from loguru import logger
 
 FARM_FILE = Path("state") / "farm.json"
 
+FARM_HEAL_ZONE = "Grizzleheim/GH_MainHub"
+
 # What each farm is after (shown on the stream page, filled in as looted):
 # (group, slot, item name).
 TARGETS = {
@@ -40,6 +42,15 @@ TARGETS = {
 
 def _norm(name: str) -> str:
     return "".join(ch for ch in name.lower() if ch.isalnum())
+
+
+def is_target_mob(name: str, target: str) -> bool:
+    return _norm(name) == _norm(target)
+
+
+def is_farm_zone(zone: str, target_zone: str) -> bool:
+    target_zone = target_zone.rstrip("/")
+    return zone == target_zone or zone.startswith(f"{target_zone}/")
 
 
 def target_status(farm_name: str, looted: dict) -> list[dict]:

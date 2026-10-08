@@ -1,0 +1,19 @@
+# Farm Couch Potato seeds from Troubled Warriors in Savarstaad Pass.
+# Log in and stand by the warriors before starting; the bot will not travel there.
+mode: farm
+farm_zone: Grizzleheim/GH_Hero
+farm_mob: Troubled Warrior
+farm_seconds_between_fights: 2.0
+
+safety:
+  stop_key: ctrl+shift+q
+  pause_key: ctrl+shift+p
+  max_hours: 0
+
+progression:
+  enabled: false
+
+pet:
+  auto: true
+  stop_at_goal: false
+  feed: true

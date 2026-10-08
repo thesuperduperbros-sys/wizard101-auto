@@ -1,26 +1,31 @@
 # wiz101-auto
 
-An autonomous Wizard101 bot. It reads the game's memory through
-[WizWalker](https://github.com/StarrFox/wizwalker), follows the quest arrow,
-talks to NPCs, goes through doors and dungeons, and plays battles with its own
-card-evaluation logic.
+A focused Wizard101 setup for farming Couch Potato seeds from Troubled
+Warriors in Grizzleheim's Savarstaad Pass. The default `farm` mode targets
+only that enemy in `Grizzleheim/GH_Hero` (Savarstaad Pass); the existing combat
+engine handles the fights and waits in other areas. The repository retains
+upstream features, but the default farm preset does not use them.
 
-> **Warning.** Automation breaks KingsIsle's Terms of Use and accounts do get
-> banned. Use a throwaway account, don't run it unattended for long, and
-> accept the risk yourself.
-
-## What it does
-
-| Area | Behaviour |
-|---|---|
-| **Questing** | Reads the objective text and the quest marker position, teleports there (walks if the server bounces the teleport), presses X on NPCs, doors, sigils and objects, confirms dungeon entry, uses world gates, closes shops and training menus it opens, and pulls the nearest mob for "Defeat…" objectives. |
-| **Combat** | Reads every card in hand (damage, target, pips, accuracy, enchants), every combatant (health, blades, traps, shields, boss flag) and your pips. Each step it heals when low, enchants its attack, stacks blades or traps against bosses, picks the spell and target that removes the most enemy health (kills weighted heavily), sets up while waiting for pips, and discards dead cards. |
-| **Progression** | Notices level-ups and new spells and rebuilds your deck from your spellbook: the best attacks (always keeping a cheap one for round one), a heal, a blade, a trap and a shield, all within copy limits. When a spell trainer window is open, it tries to train (experimental). |
-| **Upkeep** | Advances dialogue, declines side quests (configurable), drinks potions, picks up health and mana wisps after fights, and retries areas that haven't downloaded. |
-| **Safety** | **Ctrl+Shift+Q** stops the bot and **Ctrl+Shift+P** pauses or resumes it. It also stops after a maximum run time or no quest progress for N minutes (deaths never stop it). |
-
-Modes: `quest` (default), `fight` (you walk, it fights) and `farm` (fights
-the nearest mob over and over).
+The default launcher configuration is the Couch Potato farm: start with your
+wizard at the Troubled Warrior spawn. The bot stays in the zone where it starts,
+targets only nearby Troubled Warriors, and waits there when none are visible;
+it does not travel to `farm_zone`, roam, or use the quest watchdog's movement
+recovery. After an automatic recovery detour, it returns to the position where
+farming started. When health or mana needs recovery, it goes to Northguard
+(`Grizzleheim/GH_MainHub`) to look for recovery resources instead of searching
+Savarstaad Pass, where Grendel Darters can start unwanted fights. Leave your
+wizard logged into the game. There is no time limit by default. When pet energy
+reaches its maximum, it pauses farming, travels to the Pet Pavilion, plays the
+dance game cycling through the available tracks until the pet has no energy for
+another game, then returns and continues. Dance move inputs are separated by a
+brief 30 ms pause. If Northguard cannot restore health or mana to the fight threshold,
+the bot waits there rather than returning to farm while under threshold. Use
+**Ctrl+Shift+Q** to stop the bot. When the backpack reaches capacity, it pauses
+farming, talks to the Bazaar NPC, opens **BackPack Buddy**, selects **Find Items**,
+confirms the listed sale, waits for the inventory count to decrease, and returns
+to the saved farm camp. The trigger uses the Backpack screen's displayed
+used/allowed slot count (not the raw inventory-object list). If no items match
+the BackPack Buddy options, it resumes farming and retries the sale after a delay.
 
 ## Setup and running (Windows)
 
@@ -28,20 +33,19 @@ the nearest mob over and over).
    Also install **Git for Windows**. (The launcher can install Python 3.13
    itself if you have the Python Install Manager.)
 2. Extract the bot's zip to its own folder.
-3. Log into Wizard101 and stand in the world with your wizard.
+3. Log into Wizard101 with your wizard in the world.
 4. Double-click **`wiz101.bat`**. It will:
    - stop any other copy of the bot that's still running (older versions too),
    - check Python and Git,
    - install the bot the first time, and again only when its dependencies change
      (log in `state\setup.txt`),
-   - create `config.yaml` from the Myth preset if you don't have one,
+   - create `config.yaml` from the Couch Potato farm preset if you don't have one,
    - show a menu and start the bot after 8 seconds unless you pick something else.
 
 **Updates are automatic.** Every time `wiz101.bat` starts, it pulls the latest
 version from GitHub (`szatcg/wiz101-auto`, branch `main`) before doing anything
 else. Your `config.yaml`, `state` folder and installed packages are never
-touched. The first update may open a GitHub sign-in window, because the repo is
-private. If GitHub can't be reached, the launcher carries on with the files it
+touched. If GitHub can't be reached, the launcher carries on with the files it
 already has.
 
 If hooks fail to activate, fully restart Wizard101 and try again. Moving your
@@ -62,24 +66,17 @@ From the repo folder:
 With arguments the launcher skips the menu and the automatic git update, so
 local changes are safe.
 
-**Let Claude Code run it for you.** Open this folder in VS Code with the
-Claude Code extension (or run `claude` in its terminal). `CLAUDE.md` tells it
-how to start the bot, watch `status` and the logs, stop it cleanly, patch
-problems, run the tests, restart and push fixes. Ask it something like
-*"run the bot and keep it going; fix anything that gets stuck"*.
-
 ## Controlling the bot
 
 **Commands** (run them in the activated `.venv`):
 
 | Command | What it does |
 |---|---|
-| `wiz101-auto run -c config.yaml` | Start the bot (menu option 1 in `wiz101.bat`). Add `-m fight` or `-m farm` to change mode, and `-v` for detailed output. |
-| `wiz101-auto inspect` | Print what the bot sees right now: zone, health, quest, and in battle your cards and the move it would make. |
-| `wiz101-auto inspect --windows` | Also print the game's UI window tree. |
-| `wiz101-auto deck` | Show the known spells and the deck the bot would build. Changes nothing. |
-| `wiz101-auto deck --apply` | Rebuild the in-game deck from that plan. |
-| `wiz101-auto explore` | Save every nearby NPC, door and mob with its position to `state/explore_*.txt`. |
+| `wiz101-auto run -c config.yaml` | Start the Couch Potato farm. |
+| `wiz101-auto inspect` | Print the current zone, health, and battle state. |
+| `wiz101-auto sell-backpack` | Force one BackPack Buddy sale trip and return to camp (for a supervised live test). |
+| `wiz101-auto watch` | Follow the farm activity log. |
+| `wiz101.bat stop` | Stop the background bot and unhook from the game. |
 
 **Launcher menu:** besides running the bot, `wiz101.bat` offers a health
 check (`state\doctor.txt`), the deck plan (`state\deck.txt`), a deck rebuild,
@@ -90,55 +87,12 @@ what the bot sees (`state\inspect.txt`) and a zone recording, all saved to the
 can be changed under `safety`.
 
 **Settings:** everything is in `config.yaml`, which starts as a copy of
-`configs/myth.yaml`. See `config.example.yaml` for every option. The ones you
-will actually touch:
+`configs/couch_potato.yaml`. See `config.example.yaml` for every option. The
+farm target settings are:
 
-- `mode`: `quest`, `fight` or `farm`
-- `safety.max_hours`: session time limit
-- `quest.teleport`: `false` to walk instead of teleporting
-- `progression.deck.include` / `exclude`: force a card in or keep one out,
-  e.g. `include: {"Pixie": 2}`
-- `progression.auto_train`: turn the experimental trainer clicks off
-
-**Files the bot writes:**
-
-- `wiz101-auto.log`: full debug log
-- `state/progress.json`: level, known spells and the deck it last built
-- `state/trainer_window_*.txt`: the layout of the spell trainer's window,
-  saved the first time it opens
-- `state/explore_*.txt`: output of `explore`
-
-## Starting a brand-new wizard
-
-The bot starts once your wizard is standing in the world, so do these by hand:
-
-1. Create the character (the school quiz and appearance).
-2. Optional, but a good idea: play the short opening tutorial. It's scripted
-   and occasionally asks for specific clicks. If the bot gets stuck there,
-   finish that part yourself and restart it.
-3. From Wizard City onward, run `wiz101-auto run`.
-
-**Spells and deck:** the bot rebuilds your deck on startup, on every level
-up, whenever a trainer window closes, and every 30 minutes. Training new
-spells still needs a visit to your professor (Cyrus Drake, the Myth
-professor, in Ravenwood). The quest line takes you there sometimes. Auto
-training clicks inside the trainer window are experimental until its
-layout has been mapped. Walking to the professor automatically is on the
-roadmap and needs `explore` output from Ravenwood and the Myth school.
-
-**Progress limits:** Wizard City is free to play. Areas after it need a
-membership or crown-purchased zones. Without either, the quest line
-eventually hits a locked area and the bot stops with "no quest progress".
-
-## Configuration
-
-All options are documented in `config.example.yaml`. The most useful ones:
-
-- `quest.teleport: false`: walk instead of teleporting. It's slower but looks
-  less bot-like.
-- `combat.strategy.heal_threshold`: heal below this share of your health.
-- `combat.flee_below`: flee when health drops below this share.
-- `safety.max_hours`: hard time limit on a session.
+- `farm_zone`: expected spawn zone (default: `Grizzleheim/GH_Hero`, Savarstaad Pass); informational only—the bot stays where it starts
+- `farm_mob`: exact enemy name to target (default: `Troubled Warrior`)
+- `safety.max_hours`: session time limit (`0` means no time limit)
 
 ## Reporting problems
 
@@ -195,7 +149,7 @@ the Windows game client.
 - Smarter collision-aware teleporting (see Deimos' `collision_tp`)
 - School-aware pip accounting, and handling of shadow magic and
   multi-target spells
-- Buying potions when out, and selling or clearing a full backpack
+- Buying potions when out
 - Pet training
 
 ## Credits and license

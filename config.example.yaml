@@ -1,10 +1,10 @@
 # Copy to config.yaml and adjust. Every key is optional; defaults are shown.
 
-# quest = follow the quest arrow and fight whatever comes up
-# fight = only play battles (you walk; handy for testing combat)
-# farm  = stay in the area and fight the nearest mob repeatedly
-mode: quest
+# The default setup camps at the wizard's starting position and targets Troubled Warriors.
+mode: farm
 farm_seconds_between_fights: 2.0
+farm_zone: Grizzleheim/GH_Hero # Savarstaad Pass; farm mode stays at its starting position
+farm_mob: Troubled Warrior
 log_file: wiz101-auto.log
 
 quest:
@@ -27,7 +27,7 @@ safety:
   stop_key: ctrl+shift+q     # any ctrl/shift/alt combo + one key, e.g. "ctrl+]"
   pause_key: ctrl+shift+p
   stall_seconds: 15          # nothing happens this long -> close menus, restart step, switch quest...
-  max_hours: 4.0            # 0 = no limit
+  max_hours: 0               # 0 = no time limit
   mouseless: true           # clicks via a memory hook; your real mouse stays free
 
 combat:
@@ -46,20 +46,9 @@ combat:
     allow_discard: true
 
 progression:
-  enabled: true
-  school: ""                # blank = detect from the game
-  rebuild_on_start: true    # re-plan the deck when the bot starts
-  check_minutes: 30         # also re-read the spellbook this often (0 = only on level-up/trainer)
-  auto_train: true          # experimental: train spells when a trainer window opens
-  remind_to_train: true
-  deck:
-    attack_spells: 4        # distinct attack spells
-    attack_copies: 4
-    heal_copies: 3
-    blade_copies: 2
-    trap_copies: 2
-    shield_copies: 1
-    core_copies: 2          # copies of every chosen spell added before topping up
-    capacity: 0             # 0 = let the game enforce its deck size
-    exclude: []
-    include: {}
+  enabled: false
+
+pet:
+  auto: true
+  stop_at_goal: false       # use all available pet energy each trip
+  feed: true
