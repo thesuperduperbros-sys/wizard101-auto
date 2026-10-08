@@ -17,6 +17,7 @@ class QuestConfig:
     enabled: bool = True
     teleport: bool = True  # teleport to objectives; False = walk (slower, lower detection risk)
     accept_side_quests: bool = True  # every quest is experience; areas are cleared in order
+    side_quest_world: str = ""  # focus only on side quests in this world, e.g. Dragonspyre
     photomancy: bool = True
     # Abort questing if the objective hasn't changed for this long.
     stuck_minutes: float = 12.0

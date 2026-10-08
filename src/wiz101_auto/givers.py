@@ -255,12 +255,16 @@ class QuestGivers:
     def wanted_givers(self, zone: str) -> dict[str, list[str]] | None:
         """Givers with quests still to get in this zone's world, per its guide;
         None without a guide (ask every named NPC)."""
-        world = zone.split("/", 1)[0]
+        from .questlist import world_of_zone
+
+        world = world_of_zone(zone) or zone.split("/", 1)[0]
         if world not in self._guides:
             self._guides[world] = load_guide(world)
         guide = self._guides[world]
         if guide is None:
             return None
+        if self.q.cfg.side_quest_world and world.casefold() == self.q.cfg.side_quest_world.casefold():
+            guide = [q for q in guide if not q.main]
         from .setbacks import ALWAYS_SKIP
 
         have, done = _book_and_done()
@@ -303,11 +307,13 @@ class QuestGivers:
 
     async def _candidates(self, zone: str, reach: float = GIVER_RANGE) -> list[tuple[float, str, XYZ]]:
         from .names import lang_name
+        from .questlist import world_of_zone
 
         me = await self.client.body.position()
         mobs = await mob_positions(self.client)
         wanted = self.wanted_givers(zone)
-        guide = self._guides.get(zone.split("/", 1)[0]) or []
+        world = world_of_zone(zone) or zone.split("/", 1)[0]
+        guide = self._guides.get(world) or []
         listed = {norm(q.giver) for q in guide}  # givers the player's list knows about
         out = []
         for e in await self.client.get_base_entity_list():
@@ -347,17 +353,22 @@ class QuestGivers:
         self._last_check = time.monotonic()
         zone = await self.client.zone_name() or ""
         world = self.q._main_world
-        from .quest import FALLBACK_SIDE_PLACES
+        from .quest import FALLBACK_SIDE_PLACES, same_world
 
         places = FALLBACK_SIDE_PLACES.get(world, ())
         fallback = self.q._grinding and any(zone.startswith(p + "/") for p in places)
         # (The story's own sweep counts in any world: _main_world still named
         # an older one, and Zafaria's hub NPCs were never asked for its next quest.)
         story_sweep = bool(zone) and zone == self.main_sweep_zone
-        off_world = not world or (zone.split("/", 1)[0] != world and not fallback)
+        off_world = not world or (
+            not same_world(zone.split("/", 1)[0], world) and not fallback
+        )
         if not zone or (off_world and not story_sweep) or await self.q._in_dungeon(zone):
             return False
-        if (load_guide(zone.split("/", 1)[0]) is None and zone != self.main_sweep_zone
+        from .questlist import world_of_zone
+
+        guide_world = world_of_zone(zone) or zone.split("/", 1)[0]
+        if (load_guide(guide_world) is None and zone != self.main_sweep_zone
                 and not self.q._grinding):
             # Only where the player gave a side-quest list (docs/sidequests/<World>.txt):
             # elsewhere NPCs aren't asked at all (Wizard City's, on the way through),

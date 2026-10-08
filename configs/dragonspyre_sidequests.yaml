@@ -1,0 +1,15 @@
+mode: quest
+
+quest:
+  enabled: true
+  accept_side_quests: true
+  side_quest_world: Dragonspyre
+
+safety:
+  max_hours: 0
+
+progression:
+  enabled: false
+
+pet:
+  auto: false

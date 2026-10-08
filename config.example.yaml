@@ -10,6 +10,7 @@ log_file: wiz101-auto.log
 quest:
   teleport: true            # false = walk to objectives (slower, looks more human)
   accept_side_quests: false
+  side_quest_world: ""       # focus only on side quests in one world, e.g. Dragonspyre; ignore story quests
   photomancy: true
   stuck_minutes: 12         # stop if the objective doesn't change for this long
 

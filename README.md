@@ -93,6 +93,7 @@ farm target settings are:
 - `farm_zone`: expected spawn zone (default: `Grizzleheim/GH_Hero`, Savarstaad Pass); informational only—the bot stays where it starts
 - `farm_mob`: exact enemy name to target (default: `Troubled Warrior`)
 - `safety.max_hours`: session time limit (`0` means no time limit)
+- `quest.side_quest_world`: optionally ignore the main story and work through a single world's documented side quests; for example, run `python -m wiz101_auto start -c configs/dragonspyre_sidequests.yaml --supervise`
 
 ## Reporting problems
 

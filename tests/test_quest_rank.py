@@ -126,6 +126,19 @@ def test_side_quests_stay_in_this_world_and_prefer_bigger_rewards():
     assert pick is big  # not the tracked Wizard City one; the bigger Krokotopia reward
 
 
+def test_side_quest_world_selects_only_guide_side_quests():
+    from wiz101_auto.quest import QuestEntry, choose_side_quest_in_world, norm, same_world
+
+    side = QuestEntry(0, "Three Lock Box", active=True, world="The Grand Chasm", zone="Dragonspyre")
+    story = QuestEntry(1, "Door to the Stars", mainline=True, world="Celestia Base Camp", zone="Celestia")
+    other = QuestEntry(2, "Changing of the Guard", world="Barkingham Palace", zone="Marleybone")
+    names = {norm("Three Lock Box"), norm("Changing of the Guard")}
+
+    assert same_world("DragonSpire", "Dragonspyre")
+    assert choose_side_quest_in_world([side, story, other], "Dragonspyre", names, set()) is side
+    assert choose_side_quest_in_world([side, story, other], "Dragonspyre", names, {side.name}) is None
+
+
 def test_a_dungeons_own_quest_comes_before_the_main_quest():
     from wiz101_auto.quest import QuestEntry, dungeon_quest
 

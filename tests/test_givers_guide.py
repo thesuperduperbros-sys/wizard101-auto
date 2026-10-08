@@ -66,6 +66,36 @@ def test_pending_givers():
     assert "officerdarby" not in out
 
 
+def test_side_quest_focus_only_visits_side_quest_givers(monkeypatch):
+    from types import SimpleNamespace
+
+    import wiz101_auto.givers as givers
+
+    guide = parse_guide("""DRAGONSPYRE
+(MAIN QUEST)
+
+Story Giver
+Main Quest (100 XP)
+- Talk to someone
+
+(SIDE QUEST)
+
+Side Giver
+Optional Quest (200 XP)
+- Talk to someone
+""")
+    q = SimpleNamespace(
+        cfg=SimpleNamespace(side_quest_world="Dragonspyre"),
+        setbacks=SimpleNamespace(skipped=set()),
+    )
+    visitor = givers.QuestGivers.__new__(givers.QuestGivers)
+    visitor.q = q
+    visitor._guides = {"Dragonspyre": guide}
+    monkeypatch.setattr(givers, "_book_and_done", lambda: (set(), set()))
+
+    assert visitor.wanted_givers("DragonSpire/DS_Hub_Cathedral") == {"sidegiver": ["Optional Quest"]}
+
+
 def test_prospector_zeke_is_never_a_giver_to_visit():
     g = parse_guide("Prospector Zeke\nStray Cat Strut(176 gold, 1640 XP)\n-Locate Regent's Square Cat\n")
     assert pending_givers(g, set(), set()) == {}
