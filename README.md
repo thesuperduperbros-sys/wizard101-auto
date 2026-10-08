@@ -5,9 +5,7 @@ An autonomous Wizard101 bot. It reads the game's memory through
 talks to NPCs, goes through doors and dungeons, and plays battles with its own
 card-evaluation logic.
 
-> **Warning.** Automation breaks KingsIsle's Terms of Use and accounts do get
-> banned. Use a throwaway account, don't run it unattended for long, and
-> accept the risk yourself.
+
 
 ## What it does
 
